@@ -1,7 +1,7 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
-import helmet from "helmet";
+import { default as helmet } from "helmet";
 import { toNodeHandler } from "better-auth/node";
 import { env } from "./config/env.js";
 import { auth } from "./lib/auth.js";
