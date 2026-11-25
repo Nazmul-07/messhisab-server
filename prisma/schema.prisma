@@ -1,0 +1,432 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum MessRole {
+  ADMIN
+  MEMBER
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INACTIVE
+  REMOVED
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+}
+
+enum PaymentSource {
+  MEMBER
+  CASHBOX
+}
+
+enum PaymentMethod {
+  CASH
+  BKASH
+  NAGAD
+  BANK
+  OTHER
+}
+
+enum ExpenseCategory {
+  RENT
+  ELECTRICITY
+  GAS
+  WIFI
+  WATER
+  CLEANING
+  MAINTENANCE
+  OTHER
+}
+
+enum AllocationMethod {
+  EQUAL
+  MEAL_BASED
+  CUSTOM
+}
+
+enum MonthStatus {
+  OPEN
+  CLOSED
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+// ==========================================
+// AUTHENTICATION MODELS (Better Auth)
+// ==========================================
+
+model User {
+  id            String       @id @default(auto()) @map("_id") @db.ObjectId
+  name          String
+  email         String       @unique
+  emailVerified Boolean      @default(false)
+  image         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  sessions      Session[]
+  accounts      Account[]
+  memberships   Membership[]
+  createdMesses Mess[]       @relation("MessCreator")
+  sentInvites   MessInvite[] @relation("InviteSender")
+  auditLogs     AuditLog[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId                String    @db.ObjectId
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ==========================================
+// CORE BUSINESS MODELS
+// ==========================================
+
+model Mess {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  address     String?
+  currency    String   @default("BDT")
+  timezone    String   @default("Asia/Dhaka")
+  isActive    Boolean  @default(true)
+  createdById String   @db.ObjectId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy    User               @relation("MessCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  memberships  Membership[]
+  invites      MessInvite[]
+  bazarEntries BazarEntry[]
+  mealRecords  MealRecord[]
+  deposits     Deposit[]
+  expenses     Expense[]
+  expenseShares ExpenseShare[]
+  months       MessMonth[]
+  settlements  MemberSettlement[]
+  auditLogs    AuditLog[]
+
+  @@index([createdById])
+  @@map("mess")
+}
+
+model Membership {
+  id          String           @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String           @db.ObjectId
+  userId      String           @db.ObjectId
+  role        MessRole         @default(MEMBER)
+  status      MembershipStatus @default(ACTIVE)
+  displayName String?
+  phone       String?
+  joinedAt    DateTime         @default(now())
+  leftAt      DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  mess                Mess               @relation(fields: [messId], references: [id], onDelete: Restrict)
+  user                User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  paidBazarEntries    BazarEntry[]       @relation("BazarPayer")
+  createdBazarEntries BazarEntry[]       @relation("BazarCreator")
+  mealRecords         MealRecord[]       @relation("MealMember")
+  createdMealRecords  MealRecord[]       @relation("MealCreator")
+  deposits            Deposit[]          @relation("DepositMember")
+  createdDeposits     Deposit[]          @relation("DepositCreator")
+  paidExpenses        Expense[]          @relation("ExpensePayer")
+  createdExpenses     Expense[]          @relation("ExpenseCreator")
+  expenseShares       ExpenseShare[]
+  settlements         MemberSettlement[]
+
+  @@unique([messId, userId])
+  @@index([userId, status])
+  @@index([messId, status])
+  @@map("membership")
+}
+
+model MessInvite {
+  id          String       @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String       @db.ObjectId
+  email       String
+  role        MessRole     @default(MEMBER)
+  token       String       @unique
+  status      InviteStatus @default(PENDING)
+  invitedById String       @db.ObjectId
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  mess      Mess @relation(fields: [messId], references: [id], onDelete: Cascade)
+  invitedBy User @relation("InviteSender", fields: [invitedById], references: [id], onDelete: Restrict)
+
+  @@index([messId, status])
+  @@index([email, status])
+  @@map("mess_invite")
+}
+
+// ==========================================
+// FINANCIAL MODELS (All money in integer paisa)
+// ==========================================
+
+model BazarEntry {
+  id                    String        @id @default(auto()) @map("_id") @db.ObjectId
+  messId                String        @db.ObjectId
+  monthKey              String
+  title                 String
+  amountPaisa           Int
+  purchaseDate          DateTime
+  paymentSource         PaymentSource
+  paymentMethod         PaymentMethod
+  paidByMembershipId    String?       @db.ObjectId
+  description           String?
+  receiptUrl            String?
+  createdByMembershipId String        @db.ObjectId
+  isDeleted             Boolean       @default(false)
+  deletedAt             DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  mess      Mess        @relation(fields: [messId], references: [id], onDelete: Restrict)
+  paidBy    Membership? @relation("BazarPayer", fields: [paidByMembershipId], references: [id], onDelete: Restrict)
+  createdBy Membership  @relation("BazarCreator", fields: [createdByMembershipId], references: [id], onDelete: Restrict)
+
+  @@index([messId, monthKey, isDeleted])
+  @@index([messId, purchaseDate])
+  @@index([paidByMembershipId])
+  @@map("bazar_entry")
+}
+
+model MealRecord {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  messId                String   @db.ObjectId
+  membershipId          String   @db.ObjectId
+  monthKey              String
+  date                  DateTime
+  mealType              MealType
+  mealHalfUnits         Int
+  note                  String?
+  createdByMembershipId String   @db.ObjectId
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  mess       Mess       @relation(fields: [messId], references: [id], onDelete: Restrict)
+  membership Membership @relation("MealMember", fields: [membershipId], references: [id], onDelete: Restrict)
+  createdBy  Membership @relation("MealCreator", fields: [createdByMembershipId], references: [id], onDelete: Restrict)
+
+  @@unique([messId, membershipId, date, mealType])
+  @@index([messId, monthKey])
+  @@index([messId, date])
+  @@map("meal_record")
+}
+
+model Deposit {
+  id                    String        @id @default(auto()) @map("_id") @db.ObjectId
+  messId                String        @db.ObjectId
+  membershipId          String        @db.ObjectId
+  monthKey              String
+  amountPaisa           Int
+  depositDate           DateTime
+  paymentMethod         PaymentMethod
+  reference             String?
+  note                  String?
+  createdByMembershipId String        @db.ObjectId
+  isDeleted             Boolean       @default(false)
+  deletedAt             DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  mess       Mess       @relation(fields: [messId], references: [id], onDelete: Restrict)
+  membership Membership @relation("DepositMember", fields: [membershipId], references: [id], onDelete: Restrict)
+  createdBy  Membership @relation("DepositCreator", fields: [createdByMembershipId], references: [id], onDelete: Restrict)
+
+  @@index([messId, monthKey, isDeleted])
+  @@index([messId, membershipId, monthKey])
+  @@map("deposit")
+}
+
+model Expense {
+  id                    String           @id @default(auto()) @map("_id") @db.ObjectId
+  messId                String           @db.ObjectId
+  monthKey              String
+  title                 String
+  category              ExpenseCategory
+  amountPaisa           Int
+  expenseDate           DateTime
+  allocationMethod      AllocationMethod
+  paymentSource         PaymentSource
+  paymentMethod         PaymentMethod
+  paidByMembershipId    String?          @db.ObjectId
+  description           String?
+  createdByMembershipId String           @db.ObjectId
+  isDeleted             Boolean          @default(false)
+  deletedAt             DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  mess      Mess           @relation(fields: [messId], references: [id], onDelete: Restrict)
+  paidBy    Membership?    @relation("ExpensePayer", fields: [paidByMembershipId], references: [id], onDelete: Restrict)
+  createdBy Membership     @relation("ExpenseCreator", fields: [createdByMembershipId], references: [id], onDelete: Restrict)
+  shares    ExpenseShare[]
+
+  @@index([messId, monthKey, isDeleted])
+  @@index([paidByMembershipId])
+  @@map("expense")
+}
+
+model ExpenseShare {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  messId       String   @db.ObjectId
+  expenseId    String   @db.ObjectId
+  membershipId String   @db.ObjectId
+  monthKey     String
+  amountPaisa  Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  mess       Mess       @relation(fields: [messId], references: [id], onDelete: Restrict)
+  expense    Expense    @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+
+  @@unique([expenseId, membershipId])
+  @@index([messId, monthKey, membershipId])
+  @@map("expense_share")
+}
+
+// ==========================================
+// ACCOUNTING & SETTLEMENT MODELS
+// ==========================================
+
+model MessMonth {
+  id                     String      @id @default(auto()) @map("_id") @db.ObjectId
+  messId                 String      @db.ObjectId
+  monthKey               String
+  status                 MonthStatus @default(OPEN)
+  totalBazarPaisa        Int         @default(0)
+  totalMealHalfUnits     Int         @default(0)
+  mealRateRoundedPaisa   Int         @default(0)
+  totalOtherExpensePaisa Int         @default(0)
+  totalDepositPaisa      Int         @default(0)
+  closedAt               DateTime?
+  closedByMembershipId   String?     @db.ObjectId
+  reopenedAt             DateTime?
+  reopenedByMembershipId String?     @db.ObjectId
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+
+  mess        Mess               @relation(fields: [messId], references: [id], onDelete: Restrict)
+  settlements MemberSettlement[]
+
+  @@unique([messId, monthKey])
+  @@map("mess_month")
+}
+
+model MemberSettlement {
+  id                     String   @id @default(auto()) @map("_id") @db.ObjectId
+  messId                 String   @db.ObjectId
+  messMonthId            String   @db.ObjectId
+  membershipId           String   @db.ObjectId
+  monthKey               String
+  totalMealHalfUnits     Int
+  mealCostPaisa          Int
+  otherExpenseSharePaisa Int
+  totalCostPaisa         Int
+  depositPaisa           Int
+  bazarPaidPaisa         Int
+  otherExpensePaidPaisa  Int
+  totalCreditPaisa       Int
+  netBalancePaisa        Int
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  mess       Mess       @relation(fields: [messId], references: [id], onDelete: Restrict)
+  messMonth  MessMonth  @relation(fields: [messMonthId], references: [id], onDelete: Restrict)
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+
+  @@unique([messId, membershipId, monthKey])
+  @@index([messMonthId])
+  @@map("member_settlement")
+}
+
+// ==========================================
+// AUDIT LOG
+// ==========================================
+
+model AuditLog {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  messId      String   @db.ObjectId
+  actorUserId String   @db.ObjectId
+  action      String
+  entityType  String
+  entityId    String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  mess  Mess @relation(fields: [messId], references: [id], onDelete: Restrict)
+  actor User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([messId, createdAt])
+  @@map("audit_log")
+}
